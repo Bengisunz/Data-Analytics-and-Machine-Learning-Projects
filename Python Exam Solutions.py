@@ -1,5 +1,9 @@
 #QUESTIONS & ANSWERS
 
+
+
+print("c")
+
 print("PART A- Task 1")
 
 #Python is a powerful language that has a growing ecosystem.
