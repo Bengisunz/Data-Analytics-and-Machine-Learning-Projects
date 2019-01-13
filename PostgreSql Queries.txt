@@ -75,7 +75,7 @@ ORDER BY averagerating DESC
 
 
 
---3. The ranking of the tv series between 2000 and 2017
+--4. The ranking of the tv series between 2000 and 2017
 
 SELECT te.tconst,tvseries.primarytitle,tvseries.genres,te.seasonnumber,tvseries.startyear,tvseries.startyear,tr.averagerating
 FROM
