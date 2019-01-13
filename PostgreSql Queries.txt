@@ -1,5 +1,6 @@
----
-''1. The director names of the Sci-Fi movies released after 2015 whose ratings are more than 8. l would like to see the popular sci-fi movies released in the last two years with the highest ratings. 
+
+
+--1. The director names of the Sci-Fi movies released after 2015 whose ratings are more than 8. l would like to see the popular sci-fi movies released in the last two years with the highest ratings. 
 l take the movies that are rated more than 100 times  because more views,perspectives means trustable rating
 
 SELECT sf.tconst, sf.primarytitle, tc.directors,nb.primaryname, tr.averagerating
@@ -20,7 +21,8 @@ LIMIT 20;
 
 
 
-''2. The director names that directed both and only drama and comedy movies alone.
+
+--2. The director names that directed both and only drama and comedy movies alone.
 
 
 select nb.primaryname, nb.primaryprofession from
@@ -35,7 +37,12 @@ select nb.primaryname, nb.primaryprofession from
 left join name_basics nb on nb.nconst=dc.directors
 limit 10;
 
---QUERY 1:The rating of the comedy movies after 1989
+
+
+
+
+
+--3. The rating of the comedy movies after 1989
 SELECT movies.*, t.averagerating,t.numvotes
   FROM
 (
@@ -51,7 +58,9 @@ limit 100
 
 
 
---3. Taraji P. Henson's movies ordered by average ratings
+
+
+--4. Taraji P. Henson's movies ordered by average ratings
 WITH tn AS
 (
 SELECT nconst, primaryname
@@ -75,7 +84,7 @@ ORDER BY averagerating DESC
 
 
 
---4. The ranking of the tv series between 2000 and 2017
+--5. The ranking of the tv series between 2000 and 2017
 
 SELECT te.tconst,tvseries.primarytitle,tvseries.genres,te.seasonnumber,tvseries.startyear,tvseries.startyear,tr.averagerating
 FROM
@@ -98,7 +107,7 @@ LIMIT 100
 
 
 
---5. query
+--6. Sci-Fi Movies
 
 SELECT sf.tconst, sf.primarytitle, tc.directors,nb.primaryname, tr.averagerating
 FROM
