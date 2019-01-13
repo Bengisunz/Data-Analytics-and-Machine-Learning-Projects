@@ -1,0 +1,138 @@
+
+''1. The director names of the Sci-Fi movies released after 2015 whose ratings are more than 8. l would like to see the popular sci-fi movies released in the last two years with the highest ratings. 
+l take the movies that are rated more than 100 times  because more views,perspectives means trustable rating
+
+SELECT sf.tconst, sf.primarytitle, tc.directors,nb.primaryname, tr.averagerating
+FROM
+	(
+	SELECT tconst,primarytitle,genres,startyear
+	FROM title_basics
+	WHERE  genres ~ '(?i)Sci-Fi' and 
+		startyear > 2015
+	) sf
+LEFT JOIN title_crew tc on tc.tconst=sf.tconst
+join name_basics nb on nb.nconst = tc.directors
+JOIN title_ratings tr ON tr.tconst=sf.tconst
+WHERE tr.averagerating>8 AND tr.numVotes>100
+ORDER BY tr.averagerating DESC
+LIMIT 20;
+
+
+
+
+''2. The director names that directed both and only drama and comedy movies alone.
+
+
+select nb.primaryname, nb.primaryprofession from
+    (select tc.directors
+    from title_crew as tc left join title_basics tb on tc.tconst=tb.tconst
+    where tb.genres LIKE '%Drama%' AND tc.directors NOT LIKE '%,%'
+    INTERSECT
+    select tc.directors
+    from title_crew as tc left join title_basics tb on tc.tconst=tb.tconst
+    where tb.genres LIKE '%Comedy%' AND tc.directors NOT LIKE '%,%'
+    ) dc
+left join name_basics nb on nb.nconst=dc.directors
+limit 10;
+
+--QUERY 1:The rating of the comedy movies after 1989
+SELECT movies.*, t.averagerating,t.numvotes
+  FROM
+(
+SELECT tconst, originaltitle, startyear, genres
+  FROM title_basics
+  WHERE  genres ~ '(?i)comedy' and 
+    startyear > 1989
+ ) 
+  movies
+JOIN title_ratings t ON movies.tconst=t.tconst
+ORDER BY t.averagerating desc
+limit 100
+
+
+
+--3. Taraji P. Henson's movies ordered by average ratings
+WITH tn AS
+(
+SELECT nconst, primaryname
+FROM name_basics 
+WHERE primaryname LIKE '%Taraji P. Henson%'
+),
+tname AS
+(
+SELECT tconst FROM tn 
+JOIN title_principals_melt tpm ON tn.nconst=tpm.principalcast
+)
+SELECT tb.*,tr.averagerating,numvotes FROM
+tname AS t
+JOIN title_basics AS tb ON t.tconst = tb.tconst
+JOIN title_ratings AS tr ON tb.tconst = tr.tconst
+WHERE tb.titletype='movie'
+ORDER BY averagerating DESC
+
+
+
+
+
+
+--3. The ranking of the tv series between 2000 and 2017
+
+SELECT te.tconst,tvseries.primarytitle,tvseries.genres,te.seasonnumber,tvseries.startyear,tvseries.startyear,tr.averagerating
+FROM
+(
+SELECT tconst,primarytitle,genres,startyear
+FROM title_basics
+WHERE titletype ~ '(?i)tvEpisode' 
+ AND NOT primarytitle ~ '(?i)episode'    
+ --l didn't want to see the names that start with 'Episode...'
+) 
+tvseries
+LEFT JOIN title_episode te on te.tconst=tvseries.tconst
+JOIN title_ratings tr ON tr.tconst=tvseries.tconst
+WHERE tvseries.startyear>2000 and tvseries.startyear<2017
+ORDER BY tr.averagerating DESC
+LIMIT 100
+
+
+
+
+
+
+--5. query
+
+SELECT sf.tconst, sf.primarytitle, tc.directors,nb.primaryname, tr.averagerating
+FROM
+(
+SELECT tconst,primarytitle,genres,startyear
+FROM title_basics
+WHERE  genres ~ '(?i)Sci-Fi' and 
+    startyear > 2015
+) sf
+LEFT JOIN title_crew tc on tc.tconst=sf.tconst
+join name_basics nb on nb.nconst = tc.directors
+JOIN title_ratings tr ON tr.tconst=sf.tconst
+WHERE tr.averagerating>8 AND tr.numVotes>100
+ORDER BY tr.averagerating DESC
+LIMIT 20;
+
+
+
+WITH ws AS
+(
+SELECT nconst, primaryname
+FROM name_basics 
+WHERE primaryname LIKE '%Will Smith%'
+),
+wf AS
+(
+SELECT tconst FROM ws 
+JOIN title_basics tb ON tb.tconst=ws.tconst
+)
+ 
+SELECT tb.titletype,tb.genres FROM
+tname AS t
+JOIN title_basics AS tb ON t.tconst = tb.tconst
+ 
+WHERE tb.titletype='movie'
+GROUP BY tb.genres DESC
+ORDER BY tb.genres DESC;
