@@ -1,0 +1,441 @@
+
+---
+title: "Marketing Analytics Classification Group Project"
+output:
+  html_document:
+    toc: yes
+  html_notebook:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Classification Churn
+
++ `State:` the US state in which the customer resides, indicated by a two-letter abbreviation; for example, OH or NJ
++ `Account Length:` the number of days that this account has been active
++ `Area Code:` the three-digit area code of the corresponding customer’s phone number
++ `Int’l Plan:` whether the customer has an international calling plan: yes/no
++ `VMail Plan:` whether the customer has a voice mail feature: yes/no
++ `VMail Message:` presumably the average number of voice mail messages per month
++ `Day Mins:` the total number of calling minutes used during the day
++ `Day Calls:` the total number of calls placed during the day
++ `Day Charge:` the billed cost of daytime calls
++ `Eve Mins, Eve Calls, Eve Charge:` the billed cost for calls placed during the evening
++ `Night Mins, Night Calls, Night Charge:` the billed cost for calls placed during nighttime
++ `Intl Mins, Intl Calls, Intl Charge:` the billed cost for international calls
++ `CustServ Calls:` the number of calls placed to Customer Service
++ `Churn?:` whether the customer left the service: true/false
+
+
+```{r, warning=FALSE, message=FALSE}
+library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(corrplot)
+library(pROC)
+library(caTools)
+library(plotROC)
+library(caret)
+library(ggplot2)
+library(corrplot)
+if (!require("rpart")) install.packages("rpart")
+library("rpart")
+if (!require("rpart.plot")) install.packages("rpart.plot")
+library("rpart.plot")
+library(caTools)
+library(ROCR)
+library(gridExtra)
+if (!require("ROSE")) install.packages("ROSE")
+library("ROSE")
+
+set.seed(123)
+churn_train <-read.csv("C:/Users/409-21/Desktop/MA/churn_train.csv")
+str(churn_train)
+
+churn_validation <-read.csv("C:/Users/409-21/Desktop/MA/churn_validation.csv")
+str(churn_validation)
+```
+
+```{r}
+prop.table(table(Target_Ratio=churn_train$Churn))
+```
+
+```{r}
+table(churn_train$State)
+# plot a histogram for this variable
+with(churn_train, hist(Account.length ))
+table(churn_train$Area.code)
+table(churn_train$International.plan)
+table(churn_train$Voice.mail.plan)
+# plot a histogram for this variable
+with(churn_train, hist(Number.vmail.messages))
+# plot a histogram for this variable
+with(churn_train, hist(Customer.service.calls))
+
+```
+
+```{r}
+
+# histogram of age by income group
+ggplot(churn_train) + aes(x=as.numeric(Total.day.calls), group=Churn, fill=Churn) + 
+  geom_histogram(binwidth=1, color='black')
+```
+
+```{r}
+
+# histogram of age by income group
+ggplot(churn_train) + aes(x=as.numeric( Total.night.calls), group=Churn, fill=Churn) + 
+  geom_histogram(binwidth=1, color='black')
+```
+```{r}
+# Churn By State
+
+# histogram of age by income group
+ggplot(churn_train) + aes(x=as.numeric(State), group=Churn, fill=Churn) + 
+  geom_histogram(binwidth=1, color='black')
+```
+
+```{r}
+# Churn By Area Code
+
+# histogram of age by income group
+ggplot(churn_train) + aes(x=as.numeric(Area.code), group=Churn, fill=Churn) + 
+  geom_histogram(binwidth=1, color='black')
+```
+
+```{r}
+# Churn By Customers with International plan
+
+# histogram of age by income group
+ggplot(churn_train) + aes(x=as.numeric(International.plan ), group=Churn, fill=Churn) + 
+  geom_histogram(binwidth=1, color='black')
+```
+
+```{r}
+# Churn By Customers with Voice mail plan
+
+# histogram of age by income group
+ggplot(churn_train) + aes(x=as.numeric(Voice.mail.plan), group=Churn, fill=Churn) + 
+  geom_histogram(binwidth=1, color='black')
+```
+
+
+```{r}
+summary(churn_train$Customer.service.calls)
+summary(churn_train$State)
+ 
+```
+
+```{r}
+
+daymin <- ggplot(churn_train, aes(Churn, Total.day.minutes, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+evemin <- ggplot(churn_train, aes(Churn, Total.eve.minutes, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+nitmin <- ggplot(churn_train, aes(Churn, Total.night.minutes, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+intmin <- ggplot(churn_train, aes(Churn, Total.intl.minutes, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+daycal <- ggplot(churn_train, aes(Churn, Total.day.calls, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+evecal <- ggplot(churn_train, aes(Churn, Total.eve.calls, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+nitcal <- ggplot(churn_train, aes(Churn, Total.night.calls, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+intcal <- ggplot(churn_train, aes(Churn, Total.intl.calls, fill = Churn)) + geom_boxplot(alpha = 0.8) + theme(legend.position = "null")
+grid.arrange(daymin, evemin, nitmin, intmin, 
+             daycal, evecal, nitcal, intcal, 
+             ncol = 4, nrow = 2)
+```
+
+
+```{r}
+
+# Create correlation plot for numerical features
+corrplot(cor(churn_train[sapply(churn_train, is.numeric)]))
+```
+
+```{r}
+churn_train$total_day_charge <- NULL
+churn_train$total_eve_charge <- NULL
+churn_train$total_night_charge <- NULL
+churn_train$total_intl_charge <- NULL
+churn_validation$total_day_charge <- NULL
+churn_validation$total_eve_charge <- NULL
+churn_validation$total_night_charge <- NULL
+churn_validation$total_intl_charge <- NULL
+```
+
+
+```{r}
+
+#Split dataset train and test. 70% train, 30% test data
+split <- sample.split(churn_train$Churn, SplitRatio = 0.7)
+train <- subset(churn_train, split == TRUE)
+test <- subset(churn_train, split == FALSE)
+
+prop.table(table(Target_Ratio=train$Churn))
+prop.table(table(Target_Ratio=test$Churn))
+
+#Tranforming variables to numeric form 
+#no=1, yes =0
+#str(train)
+train$Churn <- as.integer(train$Churn)
+train$Churn[train$Churn == "1"] <- 1
+train$Churn[train$Churn == "2"] <- 0
+
+train$International.plan <-as.integer(train$International.plan)
+train$International.plan[train$International.plan == "1"] <- 0
+train$International.plan[train$International.plan == "2"] <- 1
+
+train$Voice.mail.plan <- as.integer(train$Voice.mail.plan)
+train$Voice.mail.plan[train$Voice.mail.plan == "1"] <- 0
+train$Voice.mail.plan[train$Voice.mail.plan == "2"] <- 1
+
+test$Churn <- as.integer(test$Churn)
+test$Churn[test$Churn == "1"] <- 1
+test$Churn[test$Churn == "2"] <- 0
+
+test$International.plan <-as.integer(test$International.plan)
+test$International.plan[test$International.plan == "1"] <- 0
+test$International.plan[test$International.plan == "2"] <- 1
+
+test$Voice.mail.plan <- as.integer(test$Voice.mail.plan)
+test$Voice.mail.plan[test$Voice.mail.plan == "1"] <- 0
+test$Voice.mail.plan[test$Voice.mail.plan == "2"] <- 1
+
+#Copy data for tree model
+train_tree <- train
+test_tree <- test
+
+
+```
+
+
+```{r}
+#Validation data transformation
+churn_validation$Churn <- as.integer(churn_validation$Churn)
+churn_validation$Churn[churn_validation$Churn == "1"] <- 0
+churn_validation$Churn[churn_validation$Churn == "2"] <- 1
+
+churn_validation$International.plan <-as.integer(churn_validation$International.plan)
+churn_validation$International.plan[churn_validation$International.plan == "1"] <- 0
+churn_validation$International.plan[churn_validation$International.plan == "2"] <- 1
+
+churn_validation$Voice.mail.plan <- as.integer(churn_validation$Voice.mail.plan)
+churn_validation$Voice.mail.plan[churn_validation$Voice.mail.plan == "1"] <- 0
+churn_validation$Voice.mail.plan[churn_validation$Voice.mail.plan == "2"] <- 1
+
+prop.table(table(Target_Ratio=churn_validation$Churn))
+prop.table(table(Target_Ratio=churn_train$Churn))
+
+
+```
+
+# Create Model
+
+## Model 1 Logistic Regression
+
+```{r}
+# ----------------------------------
+# specify predictive model
+# ----------------------------------
+model <- {Churn ~ Account.length + Area.code + International.plan + Voice.mail.plan + Number.vmail.messages +
+    Total.day.minutes + Total.day.calls + Total.eve.minutes + Total.eve.calls + 
+    Total.night.minutes + Total.night.calls+ Total.intl.minutes + Total.intl.calls + Customer.service.calls}
+
+# ----------------------------------
+# fit logistic regression model 
+# ----------------------------------
+churn_fit <- glm(model, family=binomial, data=train)
+print(summary(churn_fit))
+#print(anova(churn_fit, test="Chisq"))
+
+# compute predicted probability of churn
+test$Predict_Prob_Churn <- predict.glm(churn_fit, test, type = "response") 
+```
+
+```{r}
+# Importance of features
+varImp(churn_fit)
+```
+
+
+```{r}
+
+test$Predict_Response <- ifelse((test$Predict_Prob_Churn > 0.5), 'TRUE', 'FALSE')
+
+confusion_matrix <- table(test$Predict_Response, test$Churn)
+cat("\nConfusion Matrix (rows=Predicted Response, columns=Actual Choice\n")
+print(confusion_matrix)
+predictive_accuracy <- (confusion_matrix[1,1] + confusion_matrix[2,2])/sum(confusion_matrix)
+predictive_precision <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,1])
+predictive_recall <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,2])
+cat("\nPercent Accuracy: ", round(predictive_accuracy * 100, digits = 2))
+cat("\nPercent Precision: ", round(predictive_precision * 100, digits = 2))
+cat("\nPercent Recall: ", round(predictive_recall * 100, digits = 2))
+```
+```{r}
+
+roc_logistic = roc.curve(response = test$Churn, predicted = test$Predict_Prob_Churn, col = "#45a163")
+
+```
+
+
+## Model 2 Decision Tree 
+
+```{r, warning=FALSE, message=FALSE}
+
+model <- {Churn ~ Account.length + Area.code + International.plan + Voice.mail.plan + Number.vmail.messages +
+    Total.day.minutes + Total.day.calls + Total.eve.minutes + Total.eve.calls + 
+    Total.night.minutes + Total.night.calls+ Total.intl.minutes + Total.intl.calls + Customer.service.calls}
+
+
+tree = rpart(model, data = train_tree, method="class")
+rpart.plot(tree)
+pred_tree = predict(tree, test_tree, type = 'class')
+pred_tree_prob = predict(tree, test_tree, type='prob')[,2]
+
+confusion_matrix = table(actual=test_tree$Churn, predicted=pred_tree)
+cat("\nConfusion Matrix (rows=Predicted Response, columns=Actual Choice\n")
+print(confusion_matrix)
+
+predictive_accuracy <- (confusion_matrix[1,1] + confusion_matrix[2,2])/sum(confusion_matrix)
+predictive_precision <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,1])
+predictive_recall <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,2])
+cat("\nPercent Accuracy: ", round(predictive_accuracy * 100, digits = 2))
+cat("\nPercent Precision: ", round(predictive_precision * 100, digits = 2))
+cat("\nPercent REcall: ", round(predictive_recall * 100, digits = 2))
+
+roc_tree = roc.curve(response = test_tree$Churn, pred_tree_prob, col = "#0d84da")
+
+
+```
+
+## Scoring on Validation Data (Decision Tree)
+
+```{r, warning=FALSE, message=FALSE}
+
+
+pred_tree = predict(tree, churn_validation, type = 'class')
+pred_tree_prob = predict(tree, churn_validation, type='prob')[,2]
+
+confusion_matrix = table(actual=churn_validation$Churn, predicted=pred_tree)
+cat("\nConfusion Matrix (rows=Predicted Response, columns=Actual Choice\n")
+print(confusion_matrix)
+
+predictive_accuracy <- (confusion_matrix[1,1] + confusion_matrix[2,2])/sum(confusion_matrix)
+predictive_precision <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,1])
+predictive_recall <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,2])
+cat("\nPercent Accuracy: ", round(predictive_accuracy * 100, digits = 2))
+cat("\nPercent Precision: ", round(predictive_precision * 100, digits = 2))
+cat("\nPercent REcall: ", round(predictive_recall * 100, digits = 2))
+
+roc_tree = roc.curve(response = churn_validation$Churn, pred_tree_prob, col = "#0d84da")
+
+
+```
+## Scoring on Validation Data (Logistic Regression)
+
+```{r, warning=FALSE, message=FALSE}
+
+
+churn_validation$Predict_Prob_Churn <- predict.glm(churn_fit, churn_validation, type = "response") 
+
+churn_validation$Predict_Response <- ifelse((churn_validation$Predict_Prob_Churn > 0.5), 'TRUE', 'FALSE')
+
+confusion_matrix <- table(churn_validation$Predict_Response, churn_validation$Churn)
+cat("\nConfusion Matrix (rows=Predicted Response, columns=Actual Choice\n")
+print(confusion_matrix)
+predictive_accuracy <- (confusion_matrix[1,1] + confusion_matrix[2,2])/sum(confusion_matrix)
+predictive_precision <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,1])
+predictive_recall <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,2])
+cat("\nPercent Accuracy: ", round(predictive_accuracy * 100, digits = 2))
+cat("\nPercent Precision: ", round(predictive_precision * 100, digits = 2))
+cat("\nPercent REcall: ", round(predictive_recall * 100, digits = 2))
+
+roc_logistic = roc.curve(response = churn_validation$Churn, predicted = churn_validation$Predict_Prob_Churn, col = "#45a163")
+
+```
+
+## Cross Validation for Logistic Regression
+```{r, warning=FALSE, message=FALSE}
+
+#10 fold cv
+ctrl <- trainControl(method = "cv", number = 10, savePredictions = TRUE)
+
+mod_fit <- train(model, data=train, method="glm", family="binomial", trControl = ctrl, tuneLength = 5)
+
+# Predict our cross validation data
+pred = predict(mod_fit, newdata=churn_validation)
+
+#Convert to numeric value
+pred_response <- ifelse((pred > 0.5), 1, 0)
+
+confusion_matrix <- table(pred_response, churn_validation$Churn)
+cat("\nConfusion Matrix (rows=Predicted Response, columns=Actual Choice\n")
+print(confusion_matrix)
+predictive_accuracy <- (confusion_matrix[1,1] + confusion_matrix[2,2])/sum(confusion_matrix)
+predictive_precision <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,1])
+predictive_recall <- confusion_matrix[1,1]/(confusion_matrix[1,1]+ confusion_matrix[2,2])
+cat("\nPercent Accuracy: ", round(predictive_accuracy * 100, digits = 2))
+cat("\nPercent Precision: ", round(predictive_precision * 100, digits = 2))
+cat("\nPercent REcall: ", round(predictive_recall * 100, digits = 2))
+
+roc1 = roc.curve(response = churn_validation$Churn, predicted = pred, col = "#45a163")
+
+```
+
+
+## Lift Calculation for validation dataset
+
+```{r, warning=FALSE, message=FALSE}
+
+baseline_response_rate <- as.numeric(table(churn_validation$Churn)[2])/nrow(churn_validation)
+    
+lift <- function(x, baseline_response_rate) {
+    mean(x) / baseline_response_rate
+    }
+    
+#creating 10 decile 
+churn_validation$decile <- ntile(churn_validation$Predict_Prob_Churn, 10)
+
+```
+
+```{r}
+
+# define response as 0/1 binary 
+churn_validation$response_binary <- as.numeric(churn_validation$Churn)
+
+cat("\nLift Chart Values by Decile:\n")    
+print(by(churn_validation$response_binary, churn_validation$decile, 
+    function(x) lift(x, baseline_response_rate)))    
+
+```
+
+```{r, warning=FALSE, message=FALSE}
+# 
+churn_validation_decile <- churn_validation %>% filter(decile >= 7 )
+
+confusion_matrix <- table(churn_validation_decile$Predict_Response, churn_validation_decile$Churn)
+cat("\nConfusion Matrix (rows=Predicted Response, columns=Actual Choice\n")
+print(confusion_matrix)
+predictive_accuracy <- (confusion_matrix[1,1] + confusion_matrix[2,2])/sum(confusion_matrix)                                              
+cat("\nPercent Accuracy: ", round(predictive_accuracy * 100, digits = 1))
+
+```
+
+
+## Cost Calculation
+
+```{r, warning=FALSE, message=FALSE}
+
+benefit <- function(confMatrix) {
+  tp <- confMatrix[2,2]; fn <- confMatrix[1,1]
+  fp <- confMatrix[1,2]; tn <- confMatrix[2,1]
+  
+  tp.cost <- 80      ; fn.cost <- 300
+  fp.cost <- 80      ; tn.cost <- 0
+  
+  return(tp*tp.cost + fn*fn.cost + fp*fp.cost + tn*tn.cost )
+}
+
+benefit(table(churn_validation_decile$Predict_Response, churn_validation_decile$Churn))
+
+```
