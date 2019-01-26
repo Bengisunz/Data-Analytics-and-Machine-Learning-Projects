@@ -1,0 +1,929 @@
+---
+title: "BDA 551 - Term Project"
+author: "MEF"
+date: "July 28, 2018"
+output:
+  html_document:
+    highlight: tango
+    theme: united
+    toc: yes
+    toc_depth: 6
+  pdf_document:
+    toc: yes
+    toc_depth: '6'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+- Read Data: 
+
+```{r}
+
+library(dplyr)
+library(ggplot2)
+library(e1071)
+library(MLmetrics)
+
+# Essential steps
+setwd("C:/Users/ecetp/Downloads/MEF/BDA 552 - Modelling and Evaluation/Project") #E
+#train = read.csv("Train_Data.csv", stringsAsFactors = TRUE )
+train = read.csv("Train_New_Data.csv", sep=';', stringsAsFactors = TRUE) #E
+test=  read.csv("Test_New_Data.csv",sep=';', stringsAsFactors = TRUE) #E
+train$flag <- 1 
+test$flag <- 0
+
+data <- rbind(train, test)
+
+dim(data)
+
+#summary(data)
+#sum(is.na(data$Alley))
+
+```
+
+- Clean N/A values and ID column:
+
+- Remove the columns which contains more than 10% missing values.( 6 columns ) We also dropped N/A containing rows in the remaining dataset. The size is just shrinked by 8.4% which can be acceptable.
+
+
+```{r}
+#library(dplyr)
+library(tidyr)
+
+#Id is not informative, not a predictor, so drop it:
+data <- data[ ,(!names(data) %in% c('Id'))]
+
+
+dim(data)
+####
+
+# Missing values are over 10% in 6 columns.
+which(colMeans(is.na(data)) > 0.1)
+
+# Remove these 6 columns.
+data_wo_na <-data[,-which(colMeans(is.na(data)) > 0.1)]
+
+#
+which(colMeans(is.na(data_wo_na)) > 0.0)
+
+colMeans(is.na(data_wo_na))
+
+#drop NA rows:
+data_wo_na <- drop_na(data_wo_na)
+
+# Check new version of data: 
+dim(data_wo_na)
+
+glimpse(data_wo_na)
+
+sum(is.na(data_wo_na))
+
+```
+
+75 columns left after N/A cleaning.
+
+- Some categorical features ( actually ordinal) are encoded as numeric so we converted them to factor. (Data transformation altında olmalı. )
+
+```{r}
+#Convert factors ordinal columns:
+data_wo_na$MSSubClass <- as.factor(data_wo_na$MSSubClass)
+data_wo_na$OverallQual <- as.factor(data_wo_na$OverallQual)
+data_wo_na$OverallCond <- as.factor(data_wo_na$OverallCond)
+data_wo_na$flag <- as.factor(data_wo_na$flag)
+
+```
+
+- Generate Age column from YearBuilt and drop YearBuilt column: (Data transformation altında olmalı. )
+
+```{r}
+#Generate Age from Year column:
+data_wo_na$Age <- 2018 -data_wo_na$YearBuilt
+data_wo_na <- data_wo_na[ ,(!names(data_wo_na) %in% c('YearBuilt'))]
+
+dim(data_wo_na)
+
+```
+
+### Data Visualization
+
+- In this classification part we want to predict cheap and expensive prices. The median of the sale price is use as a threshold value since median is not affected much by outliers. Let's see the price distribution, first.
+
+```{r}
+ggplot(data=data_wo_na, aes(SalePrice)) +
+ geom_histogram(aes(fill = ..count..)) +
+ #geom_density(col=2) +
+ theme_minimal() +
+ scale_fill_gradient("Count",low="blue", high="red") +
+ labs(x= 'Price', y= 'Count') +
+ ggtitle('Histogram of Sale Price of Test Set')
+```
+
+-As it can be seen from the histogram above the sale price is positively skewed. The price range lies between $35311 and $75500. Median value is $168500.
+
+```{r}
+summary(data_wo_na$SalePrice)
+```
+
+- Names of the columns with numerical entries.
+
+```{r}
+colClass <- sapply(data_wo_na, class)  # list of columns and datatype pairs.
+numericCols <- names(colClass[colClass == "integer" | colClass == "numeric"])
+print(numericCols)
+```
+
+- The rest are the cateorical features.
+
+```{r}
+catCols <- names(colClass[colClass == "factor"])
+print(catCols)
+```
+
+- In this study we defined skewed columns with skewness score higher than 0.5. Skewness is fixed with log transform.
+
+```{r}
+
+for (n in numericCols){ 
+  index = which(names(data_wo_na)==n)
+  if (abs(skewness(data_wo_na[,index])) > 0.5){
+    print(names(data_wo_na[index]))
+  }
+}
+
+```
+
+- For example lot area distribution is found to be highly skewed with a score above 5.
+
+```{r}
+ggplot(data=data_wo_na, aes(LotArea)) +
+ geom_histogram(aes(fill = ..count..)) +
+ theme_minimal() +
+ scale_fill_gradient("Count",low="blue", high="red") +
+ labs(x= 'Area', y= 'Count') +
+ ggtitle('Histogram of Lot Area')
+```
+
+Upon log-transform it is normalized.
+
+```{r}
+data_wo_na2 <- data_wo_na
+data_wo_na2$logLot <- log(data_wo_na$LotArea)
+ggplot(data=data_wo_na2, aes(logLot)) +
+ geom_histogram(aes(fill = ..count..)) +
+ theme_minimal() +
+ scale_fill_gradient("Count",low="blue", high="red") +
+ labs(x= 'Area', y= 'Count') +
+ ggtitle('Histogram of Lot Area')
+```
+
+- Overall quality seems to be a good predictor of price:
+
+```{r}
+ggplot(data = data_wo_na, aes(x = OverallQual, fill = OverallQual )) + 
+geom_bar()+ 
+scale_fill_hue(c = 80)+
+ggtitle("Distribution of Overall Quality")+
+theme_minimal()+
+geom_text(stat='count',aes(label=..count..),vjust=-0.25)
+```
+
+Unfortunately, we accidentally deleted one of the levels of our one of the most strongest predictor while removing NAs.
+
+
+- Change in the sale price with quality:
+
+```{r}
+ggplot(data = data_wo_na, aes(x = SalePrice,fill = as.factor(OverallQual))) +
+  geom_histogram(position = "stack", binwidth = 10000) +
+  ggtitle("Histogram of SalePrice with Quality") +
+  ylab("Price") +
+  xlab("Housing Price") + 
+  scale_fill_discrete(name="Overall Quality")+
+  theme_minimal()
+  
+```
+
+- Correlation matrix of numeric columns:
+
+```{r}
+
+library(corrplot)
+
+
+data_wo_na_num <- data_wo_na[,sapply(data_wo_na, is.numeric)]
+dim(data_wo_na_num)
+
+corrplot(round(cor(data_wo_na_num),3),
+         method="circle",
+         type='upper',
+         tl.cex = 0.6)
+
+
+```
+
+### Data Transformation
+
+#### High Correlations:
+- Detail of correlations:
+
+```{r}
+#1
+cor(data_wo_na_num$GarageArea,data_wo_na_num$GarageCars)  #0.832
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$GarageArea)  #0.6075
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$GarageCars) #0.6401 Keep it.
+
+#2 
+cor(data_wo_na_num$TotalBsmtSF,data_wo_na_num$X1stFlrSF)  #0.893
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$TotalBsmtSF)  #0.602
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$X1stFlrSF) # 0.6047 Keep it.
+
+#3
+
+cor(data_wo_na_num$Age,data_wo_na_num$GarageYrBlt)  #0.825
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$Age)  #0.504 Keep it.
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$GarageYrBlt) # 0.481 
+
+#4
+
+cor(data_wo_na_num$GrLivArea,data_wo_na_num$TotRmsAbvGrd)  #0.823
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$GrLivArea)  # 0.7117 Keep it.
+
+cor(data_wo_na_num$SalePrice,data_wo_na_num$TotRmsAbvGrd) # 0.5518 
+
+
+
+#Summary of PoolArea:
+summary(data_wo_na$PoolArea) # Distribution is useless.
+#Summary of Month-Sold:
+summary(data_wo_na$MoSold) # useless.
+
+data_wo_na <- data_wo_na[ ,(!names(data_wo_na) %in% c('GarageArea','TotalBsmtSF','GarageYrBlt','TotRmsAbvGrd','PoolArea','MoSold'))]
+
+dim(data_wo_na)
+
+```
+
+Due to high correlation ratios, we dropped some columns. 69 Columns are left after cleaning of NA and highly correlated numeric columns. We also drop PoolArea and MoSold columns which have meaningless distribution.
+
+
+#### Fix Skeweness & Normalization
+
+- Fix skeweness with log transform:
+
+- Fix skeweness with log transform and apply standardize the numerical columns:
+
+```{r}
+library(e1071)
+library(dplyr)
+
+colClass <- sapply(data_wo_na, class)  # list of columns and datatype pairs.
+
+# log transformation
+deskew <- function(x){
+  if (abs(skewness(x)) > 0.5){
+    x <- log(1+x)
+  }
+  x
+}
+
+# normalization
+rescale <- function(x) { (x-mean(x))/sd(x) }
+
+numericCols <- names(colClass[colClass == "integer" | colClass == "numeric"])
+
+data_wo_na <- data_wo_na %>% mutate_at(.vars=numericCols, funs(deskew)) %>% mutate_at(.vars=numericCols, funs(rescale))
+
+
+data_wo_na_num <- data_wo_na[,sapply(data_wo_na, is.numeric)]
+dim(data_wo_na)
+
+```
+
+- After transformation; check correlation matrix:
+
+```{r}
+corrplot(round(cor(data_wo_na_num),3),
+         method="circle",
+         type='upper',
+         tl.cex = 0.6)
+```
+
+### Feature Selection
+
+#### Subset Selection
+
+- Subset selection with transformed numeric columns:
+
+```{r}
+#Search best predictors in numeric columns
+library(leaps)
+set.seed(1)
+#Create set from numeric columns
+train_num <- data_wo_na_num[,sapply(data_wo_na_num, is.numeric)]
+dim(train_num)
+train_num <- train_num[ ,(!names(train_num) %in% c('flag'))]
+#test_num <- test[,sapply(data_wo_na_num, is.numeric)]
+
+
+best.subset <- regsubsets(data_wo_na_num$SalePrice~., train_num, nvmax=50)
+best.subset.summary <- summary(best.subset)
+m <- best.subset.summary$outmat
+#best.subset.summary$outmat[30:31,]
+
+
+#Adjusted R Squared
+best.subset.by.adjr2 <- which.max(best.subset.summary$adjr2)  #16
+#names(best.subset.summary)
+which(m[16,]=='*')
+
+
+#Plot 
+par(mfrow=c(2,2))
+plot(best.subset$rss, xlab="Number of Variables", ylab="RSS", type="l")
+plot(best.subset.summary$adjr2, xlab="Number of Variables", ylab="Adjusted RSq", type="l")
+points(best.subset.by.adjr2, best.subset.summary$adjr2[best.subset.by.adjr2], col="red", cex =2, pch =20)
+
+
+
+# #old:
+# LotArea + YearBuilt + YearRemodAdd + +BsmtFinSF2 + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath +
+#   + FullBath + BedroomAbvGr + KitchenAbvGr + Fireplaces + GarageCars + WoodDeckSF + OpenPorchSF + EnclosedPorch + 
+#   ScreenPorch + PoolArea + MiscVal + YrSold
+# 
+# #new:
+# LotArea +  YearRemodAdd + BsmtFinSF1 + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath +
+#  + BedroomAbvGr + KitchenAbvGr + Fireplaces + GarageCars + WoodDeckSF  + EnclosedPorch + 
+#   ScreenPorch + Age
+
+
+```
+
+- Due to  subset selection; LotArea +  YearRemodAdd + BsmtFinSF1 + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath +
+ + BedroomAbvGr + KitchenAbvGr + Fireplaces + GarageCars + WoodDeckSF  + EnclosedPorch +  ScreenPorch + Age  columns are included in the model. 
+ 
+## Modeling
+
+### 1. Regression Models
+
+#### 1.1. Linear Regression
+
+```{r}
+
+train_num_fixed <- data_wo_na%>% filter(data_wo_na$flag ==1)
+train_num_fixed <- train_num_fixed[,sapply(train_num_fixed,is.numeric)]
+
+
+dim(train_num_fixed)
+
+test_num_fixed <- data_wo_na%>% filter(data_wo_na$flag ==0)
+test_num_fixed <- test_num_fixed[,sapply(test_num_fixed,is.numeric)]
+
+#Linear Regression with 17 predictors
+library(boot)
+
+set.seed(88)
+glm.fit=glm(SalePrice~.,data=train_num_fixed)
+
+
+cv.error=cv.glm(train_num_fixed,glm.fit,K=10)$delta[1]
+cv.error
+# 0.1194035
+
+summary(glm.fit)
+
+glm.predicted=predict(glm.fit,test_num_fixed)
+
+mean((glm.predicted-test_num_fixed$SalePrice)^2)
+# 36695352395
+
+#R squared
+1-(glm.fit$deviance/glm.fit$null.deviance)
+#0.8860795
+
+
+# full numeric columns: 0.8516
+# subset selected columns: 0.8493
+
+```
+
+- For linear regression model with all transformed numeric columns; accuracy is 0.8516. For columns via subset selection, it is 
+ 0.8493.
+
+
+#### 1.2 Extreme Gradient Boosting Model
+
+```{r}
+# XG Boost
+library("xgboost") 
+library("caret")
+
+
+
+#Prepare data  for model
+train_selected=train_num_fixed[c("LotArea","YearRemodAdd","BsmtFinSF1","X2ndFlrSF","LowQualFinSF","GrLivArea","BsmtFullBath",
+                                 "BedroomAbvGr","KitchenAbvGr","Fireplaces","GarageCars","WoodDeckSF","EnclosedPorch","ScreenPorch","Age")]
+
+test_selected=test_num_fixed[c("LotArea","YearRemodAdd","BsmtFinSF1","X2ndFlrSF","LowQualFinSF","GrLivArea","BsmtFullBath",
+                                 "BedroomAbvGr","KitchenAbvGr","Fireplaces","GarageCars","WoodDeckSF","EnclosedPorch","ScreenPorch","Age")]
+# 
+# train_num_fixed <- data_wo_na%>% filter(data_wo_na$flag ==1)
+# train_num_fixed <- train_num_fixed[,sapply(train_num_fixed,is.numeric)]
+# 
+# test_num_fixed <- data_wo_na%>% filter(data_wo_na$flag ==0)
+# test_num_fixed <- test_num_fixed[,sapply(test_num_fixed,is.numeric)]
+
+xgbtrain <- model.matrix(~.+0,data = train_selected)
+xgbtest <- model.matrix(~.+0,data = test_selected)
+
+
+
+m_train <- xgb.DMatrix(data = xgbtrain,label=train_num_fixed$SalePrice)
+m_test <- xgb.DMatrix(data = xgbtest,label=test_num_fixed$SalePrice)
+
+
+#Cross Validation
+
+#Set Parameters
+params <- list(booster = "gblinear", objective = "reg:linear", 
+               eta=0.1, gamma=0, max_depth=1, min_child_weight=1, 
+               subsample=1, colsample_bytree=1, eval_metric="rmse")
+
+set.seed(88)
+xgbcv <- xgb.cv( params = params, data = m_train, nrounds = 10000, 
+                 nfold = 10, showsd = T, stratified = T, 
+                 print_every_n = 10, early_stopping_rounds = 20, maximize = F)
+
+#Best iteration results
+xgbcv$best_iteration
+
+
+
+```
+
+
+
+```{r}
+#Train with best iteration round
+
+xgb1 <- xgb.train (params = params, data = m_train, 
+                   nrounds = xgbcv$best_iteration)
+
+xgbpred <- predict (xgb1,m_test)
+
+#mean((xgbpred-test$SalePrice)^2)
+
+#Plot importance graph
+mat <- xgb.importance (feature_names = colnames(m_train),model = xgb1)
+xgb.plot.importance (importance_matrix = mat[1:18])
+
+
+
+```
+
+
+
+```{r}
+
+#Grid search
+set.seed(88)
+
+xgbGrid <-  expand.grid(nrounds = c(67,68,69), 
+                        max_depth = c(2,3,4), 
+                        eta = c(0.2),
+                        gamma = 0, colsample_bytree=c(0.9),
+                        min_child_weight=c(0.5,0.6), subsample=c(0.8))
+
+
+
+fitControl <- trainControl(method = "repeatedcv",number = 2, repeats = 1)
+
+xgbFit_gridsearch <- train(xgbtrain, train_num_fixed$SalePrice,  method = "xgbTree",
+                trControl = fitControl, verbose = T,
+                tuneGrid = xgbGrid)
+
+
+#Max R Squared Value
+max(xgbFit_gridsearch$results["Rsquared"])
+#xgbFit_gridsearch$results[order(-xgbFit_gridsearch$results["Rsquared"]),]
+
+
+
+
+
+```
+- Max rsquared after grid searh: 0.82608
+
+
+
+```{r}
+
+#Plot grid search performance
+plot(xgbFit_gridsearch)                       
+
+
+
+```
+
+```{r}
+#Plot levels
+plot(xgbFit_gridsearch, plotType = "level")
+
+```
+
+
+```{r}
+
+#Predict
+xgbpred_gridsearch <- predict (xgbFit_gridsearch,xgbtest)
+
+#Mean error between predicted vs. actual
+mean((xgbpred_gridsearch-test_num_fixed$SalePrice)^2)
+
+```
+
+- MSE is  0.16054 when the best model generated by Grid Search parameter tuning method.
+
+### 2. Classification Models
+
+#### 2.1. Logistic Regression
+
+- Convert numeric SalePrice column into two categories. Prices over median value are tagged as *1*, prices lower than the median are labeled as *0*  
+```{r,warning=FALSE}
+#attach(Boston)
+#Boston
+data2 <- data_wo_na  #data2 ve data_wo_na temizlenmis, scale edilmis variable'lar.
+#dim(boston) 
+
+data2$SalePrice <- ifelse(data2$SalePrice>=median(data2$SalePrice),1, 0) #bigger than median or not. (convert cat variable!)
+data2$SalePrice <- as.factor(data2$SalePrice)
+
+summary(data2)
+
+dim(data2)
+
+sum(is.na(data2))
+
+#data2 SalePrice kategoriye çevrilmiş hali.
+
+```
+
+- *GLM with numeric columns:* Just Numeric columns which offered by best subset selection: (Lineer Reg ile karşılaştırılmalı.)
+
+```{r,warning=FALSE}
+library(dplyr)
+
+#glimpse(data2)
+
+#fctr <- names(data2)[ sapply(data_wo_na,is.factor)]
+
+##########
+#dim(data2)
+
+#head(data2)
+
+train2 <- data2 %>% filter (data2$flag == 1 )
+test2 <- data2 %>% filter (data2$flag == 0 )
+
+
+#dim(train2)
+
+
+glm.fit=glm(SalePrice~LotArea +  YearRemodAdd + BsmtFinSF1 + X2ndFlrSF + LowQualFinSF + GrLivArea + BsmtFullBath +
+ + BedroomAbvGr + KitchenAbvGr + Fireplaces + GarageCars + WoodDeckSF  + EnclosedPorch + 
+  ScreenPorch + Age,data=train2,family=binomial) #fit
+
+#summary:
+summary(glm.fit)
+coef(glm.fit) 
+
+#Conf.Matrix:
+glm.probs=predict(glm.fit,train2,type="response")
+#length(glm.probs)
+
+glm.pred=rep(0,length(glm.probs))
+glm.pred[glm.probs>.5]=1
+
+table(glm.pred,train2$SalePrice)
+
+#Test setinde yeni kategoriler olduğu için çalışmadı. 
+
+#Conf.Matrix:
+glm.probs=predict(glm.fit,test2,type="response")
+#length(glm.probs)
+
+glm.pred=rep(0,length(glm.probs))
+glm.pred[glm.probs>.5]=1
+
+table(glm.pred,test2$SalePrice)
+
+(185+189) / (185+189+27+22) #0.884
+
+
+
+#RSquared / Adjusted R Squared:
+library(rsq)
+rsq(glm.fit)
+rsq(glm.fit,adj=TRUE)
+
+#mse:
+mean(glm.fit$residuals^2)
+
+##Evaluation Metrics:
+Accuracy(glm.pred, test2$SalePrice) #0.8841608
+AUC(glm.pred, test2$SalePrice) #0.8841881
+F1_Score(glm.pred, test2$SalePrice, positive = NULL) #0.8830549
+
+ConfusionMatrix(glm.pred, test2$SalePrice)
+
+
+```
+
+
+- *GLM with numeric columns + one hot encoded categorical columns:*
+
+- Create dummy variables:
+
+```{r}
+library(dummies)
+library(dplyr)
+
+dim(data_wo_na)
+#data_wo_na <- data_wo_na[ ,(!names(data_wo_na) %in% c('GarageArea','TotalBsmtSF','GarageYrBlt','TotRmsAbvGrd'))]
+
+
+fctr <- names(data_wo_na)[ sapply(data_wo_na,is.factor)]
+fctr <- fctr[1:length(fctr)-1]
+
+
+data_Temp <- data_wo_na  
+
+new_combi <- dummy.data.frame(data_Temp, names = fctr,sep = '_')
+
+glimpse(new_combi$flag)
+dim(new_combi) # 1338  289
+
+
+names(new_combi)  #dummyli hali new_combi
+
+```
+
+- Convert numeric SalePrice column into two categories. Prices over median value are tagged as *1*, prices lower than the median are labeled as *0*  . Now we have 289 columns.
+```{r,warning=FALSE}
+#attach(Boston)
+#Boston
+data2 <- new_combi
+#dim(boston) 
+
+data2$Price <- ifelse(data2$SalePrice>=median(data2$SalePrice),1, 0) #bigger than median or not. (convert cat variable!)
+
+dim(data2)  #1338  289
+
+
+sum(is.na(data2))
+
+```
+
+
+- All numeric columns and dummy variables:
+
+```{r,warning=FALSE}
+library(dplyr)
+
+
+train2 <- data2 %>% filter (data2$flag == 1 )
+test2 <- data2 %>% filter (data2$flag == 0 )
+
+train2 <- train2[ ,(!names(train2) %in% c('flag','SalePrice'))]
+test2 <- test2[ ,(!names(test2) %in% c('flag','SalePrice'))]
+
+
+#dim(train2)
+
+
+glm.fit=glm(Price~.,data=train2,family=binomial) #fit
+
+#summary:
+summary(glm.fit)
+coef(glm.fit) 
+
+#Conf.Matrix:
+glm.probs=predict(glm.fit,train2,type="response")
+#length(glm.probs)
+
+glm.pred=rep(0,length(glm.probs))
+glm.pred[glm.probs>.5]=1
+
+table(glm.pred,train2$Price)
+
+#Test setinde yeni kategoriler olduğu için çalışmadı. 
+
+#Conf.Matrix:
+glm.probs=predict(glm.fit,test2,type="response")
+#length(glm.probs)
+
+glm.pred=rep(0,length(glm.probs))
+glm.pred[glm.probs>.5]=1
+
+table(glm.pred,test2$Price)
+
+(173+180) / (173+180+40+30)  # 0.834
+
+#RSquared / Adjusted R Squared:
+library(rsq)
+rsq(glm.fit)
+rsq(glm.fit,adj=TRUE)
+
+#mse:
+mean(glm.fit$residuals^2)
+
+##Evaluation Metrics:
+Accuracy(glm.pred, test2$Price) #0.8345154
+AUC(glm.pred, test2$Price) #0.8345592
+F1_Score(glm.pred, test2$Price, positive = NULL) #0.8317308
+
+ConfusionMatrix(glm.pred, test2$Price)
+
+```
+
+#### 2.2. Decision Tree
+- Numeric coloumnlı Logistic ile ve Decision Tree ile karşılaştırılmalı.
+```{r}
+library(tree)
+library(ISLR)
+
+
+dim(data_wo_na)
+data_tree <- data_wo_na
+
+dim(data_tree)
+glimpse(data_tree)
+
+
+data_tree$Price <- ifelse(data_tree$SalePrice>=median(data_tree$SalePrice),1,0)
+data_tree$Price <- as.factor(data_tree$Price)
+
+
+train2 <- data_tree %>% filter (data_tree$flag == 1 )
+test2 <- data_tree %>% filter (data_tree$flag == 0 )
+
+dim(train2)
+
+dim(test2)
+
+train2 <- train2[ ,(!names(train2) %in% c('flag','SalePrice'))]
+test2 <- test2[ ,(!names(test2) %in% c('flag','SalePrice'))]
+
+dim(data_tree)
+glimpse(train2)
+
+#Forming the first decision tree
+set.seed(1)
+tree.price=tree(Price~.,train2)
+#tree.carseats 
+summary(tree.price)
+
+#plot decsision tree
+plot(tree.price) 
+text(tree.price,pretty=5)
+
+#accuracy for test:
+#Predict using validation set
+tree.pred=predict(tree.price,test2,type="class")
+table(tree.pred,test2$Price)
+
+(186+181) / (186+181+25+31)  # 0.8676
+
+##Evaluation Metrics:
+Accuracy(tree.pred, test2$Price) #0.8676123
+AUC(tree.pred, test2$Price) #0.8676451
+F1_Score(tree.pred, test2$Price, positive = NULL) #0.8660287
+
+ConfusionMatrix(tree.pred, test2$Price)
+
+
+```
+
+- Cross Validation for Pruning:
+```{r}
+
+#Form tree using 10-fold cross validating and pruning
+#misclassify a göre sýrala hangi node'un final node olacaðýný bulmak için
+
+cv.price=cv.tree(tree.price,FUN=prune.misclass) 
+
+#names(cv.price)
+cv.price
+#train dataset e CV yaparak kaç tane terminal node olması gerektiðini bulduk.
+#dev: 106 =min ; size=9. 9 tane terminal node olmasý gerektiðini söyledi. Bunu parametre olarak vericez tree'ye.
+par(mfrow=c(1,2))
+plot(cv.price$size,cv.price$dev,type="b")
+plot(cv.price$k,cv.price$dev,type="b")
+
+```
+
+9 is fine as Number of final node due to 10-Fold CV from tree library.
+
+- Tree with the best node number:
+
+```{r}
+prune.price=prune.misclass(tree.price,best=9) #elle giricez bulduðumuz deðeri yukarýda.
+plot(prune.price)
+text(prune.price,pretty=0) #pretty=1 bazý bilgileri gizler.
+tree.pred=predict(prune.price,test2,type="class")
+table(tree.pred,test2$Price)
+
+(189+185) / ((189+185+22+27)) #0.884
+
+#plot(yhat,boston.test) actual pred grafiði.
+#actual-predicted
+summary(prune.price)
+plot(tree.pred,test2$Price) 
+
+
+##Evaluation Metrics:
+Accuracy(tree.pred, test2$Price) #0.8841608
+AUC(tree.pred, test2$Price) # 0.8841881
+F1_Score(tree.pred, test2$Price, positive = NULL) #0.8830549
+
+ConfusionMatrix(tree.pred, test2$Price)
+
+```
+
+#### 2.3. RandomForest 
+
+- RandomForest with Categorical + Scaled Numeric Data
+
+```{r}
+
+library(randomForest)
+
+data_tree <- data_wo_na
+
+dim(data_tree)
+glimpse(data_tree)
+
+
+data_tree$Price <- ifelse(data_tree$SalePrice>=median(data_tree$SalePrice),1,0)
+data_tree$Price <- as.factor(data_tree$Price)
+
+
+train2 <- data_tree %>% filter (data_tree$flag == 1 )
+test2 <- data_tree %>% filter (data_tree$flag == 0 )
+
+dim(test2)
+
+train2 <- train2[ ,(!names(train2) %in% c('flag','SalePrice'))]
+test2 <- test2[ ,(!names(test2) %in% c('flag','SalePrice'))]
+
+dim(train2)
+
+#RandomForest:
+set.seed(1)
+bag.price=randomForest(train2$Price~.,data=train2,mtry=7,importance=TRUE) 
+bag.price
+
+importance(bag.price) #treeleri göremediðimiz için relative importance larý görelim.
+#importance ne kadar yüksekse o kadar iyi.
+varImpPlot(bag.price)
+#IncMSE grafiği en önemliden en aþaðýya diziyor. rm çýakrdýðýmýzda MSE ne kadar artacak diyerek onu en üse koyuyor.
+
+
+
+yhat.bag = predict(bag.price,newdata=test2)
+plot(yhat.bag, test2$Price)
+
+table(yhat.bag, test2$Price)
+
+(196+193) /(196+193+16+18)  #mtry=9 0.9196
+(196+194)/ 423 # mtry=13 0.921
+
+(198+192) / 423 # mtry=7 0.9219
+
+
+##Evaluation Metrics:
+Accuracy(yhat.bag, test2$Price) #0.9219858
+AUC(yhat.bag, test2$Price) # 0.9219574
+F1_Score(yhat.bag, test2$Price, positive = NULL) #0.9230769
+
+ConfusionMatrix(tree.pred, test2$Price)
+
+
+```
+
+
+
+- RandomForest with the best mtry (169) due to CV:
+
+Random forests has 2 parameters:
+The first parameter is the same as bagging (the number of trees)
+The second parameter (unique to randomforests) is mtry which is how many features to search over to find the best feature. this parameter is usually 1/3*D for regression and sqrt(D) for classification. thus during tree creation randomly mtry number of features are chosen from all available features and the best feature that splits the data is chosen.
+The fundamental difference is that in Random forests, only a subset of features are selected at random out of the total and the best split feature from the subset is used to split each node in a tree, unlike in bagging where all features are considered for splitting a node.
