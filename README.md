@@ -1,2 +1,1 @@
-# SmallWorks
-l put the ad-hoc works of mine.
+These are the ad-hoc projects of mine.

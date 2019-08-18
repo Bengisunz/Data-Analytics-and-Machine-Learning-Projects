@@ -1,13 +1,4 @@
 
----
-title: "Marketing Analytics Classification Group Project"
-output:
-  html_document:
-    toc: yes
-  html_notebook:
-    toc: yes
----
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
